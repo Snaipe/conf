@@ -1,0 +1,467 @@
+\documentclass[10pt]{beamer}
+
+\usetheme{m}
+
+\usepackage{fontawesome}
+\usepackage{setspace}
+\usepackage{color}
+\usepackage{listings}
+\usepackage{booktabs}
+\usepackage[scale=2]{ccicons}
+
+\definecolor{pgrey}{rgb}{0.46,0.45,0.48}
+\definecolor{pblue}{rgb}{0.13,0.13,1}
+\definecolor{pgreen}{rgb}{0,0.5,0}
+
+\lstdefinestyle{C++}
+{
+    language=C++,
+    showspaces=false,
+    showtabs=false,
+    showstringspaces=false,
+    basicstyle=\ttfamily,
+    keywordstyle=\color{magenta}\ttfamily,
+    stringstyle=\color{pgreen}\ttfamily,
+    commentstyle=\color{pgrey}\ttfamily,
+    morecomment=[l][\color{pgrey}]{\#},
+    moredelim=[il][\color{pgrey}]{\#\#},
+    moredelim=[is][\textcolor{pblue}]{$$}{$$},
+}
+\lstset{style=C++}
+
+\usepackage{pgfplots}
+\usepgfplotslibrary{dateplot}
+
+\title{Experiments on building high level abstractions with C\newline\newline Part 1: Smart Pointers}
+\subtitle{A tale of pain and wonder}
+\date{4/12/2015}
+\author{Franklin "Snaipe" Mathieu -- 2017}
+\institute{EPITA -- GCONFS}
+%\titlegraphic{\hfill\includegraphics[height=1.5cm]{logo.pdf}}
+
+\begin{document}
+
+\maketitle
+
+\section{Smart pointers for GNU C99}
+
+\begin{frame}{Smart pointers for GNU C99}
+
+  Memory management is an unsolved problem.
+
+  Known techniques rely on RAII, Reference counting, Garbage collection
+
+  There is no silver bullet, each has its drawbacks
+
+\end{frame}
+
+\begin{frame}[fragile]{A case study on C++}
+
+  C++ solves the problem with RAII and smart pointers:
+
+  \pause{}
+
+  File I/O and RAII:
+
+  \begin{lstlisting}
+  {
+    $$std::fstream$$ file("foo.txt");
+    file << "Hello world";
+  } // file is closed when exiting the scope
+  \end{lstlisting}
+
+  \pause{}
+
+  Memory allocation:
+
+  \begin{lstlisting}
+  {
+    auto ptr = std::make_unique<int>(42);
+    std::cout << *ptr;
+  } // the memory is freed when exiting the scope
+  \end{lstlisting}
+
+\end{frame}
+
+\begin{frame}[fragile]{RAII with C}
+
+  There are no RAII facilities in standard C -- cleanup is mainly done with goto
+
+  \begin{lstlisting}
+  $$FILE$$ *f = fopen("foo.txt", "w");
+  if (!f)
+    goto cleanup;
+
+  // do things
+
+  if (error_case)
+    goto cleanup;
+
+  // do more things
+
+cleanup:
+  if (f) fclose(f);
+  \end{lstlisting}
+
+\end{frame}
+
+\begin{frame}[fragile]{Extensions to the rescue}
+
+  Thankfully, some compilers leverage these limitations with extensions:
+
+  \pause{}
+
+  MSVC: Structured exception handling and try/finally
+
+  \begin{lstlisting}
+  $$FILE$$ *f = NULL;
+  __try {
+      f = fopen("foo.txt", "w");
+  } __finally {
+      if (f) fclose(f);
+  }
+  \end{lstlisting}
+
+  \pause{}
+
+  GCC, Clang/LLVM, ICC: cleanup attribute
+
+  \begin{lstlisting}
+  void fclose_stack($$FILE$$ **f) { if (*f) fclose(*f); }
+
+  __attribute__((cleanup(fclose_stack)))
+  $$FILE$$ *f = fopen("foo.txt", "w");
+  \end{lstlisting}
+\end{frame}
+
+\begin{frame}[fragile]{Building an automatic pointer}
+
+  The cleanup attribute provides the basic building block for an automatic pointer:
+
+  \begin{lstlisting}
+  void free_stack($$void$$ **f) {
+      free(*f);
+  }
+
+  #define auto_ptr __attribute__((cleanup(free_stack)))
+
+  auto_ptr int *val = malloc(sizeof (int));
+  *val = 31>174;
+  \end{lstlisting}
+
+\end{frame}
+
+\plain{But it's not good enough.}
+
+\begin{frame}[fragile]{A few issues}
+
+  \begin{lstlisting}
+  auto_ptr int *val = malloc(sizeof (int));
+  *val = 24;
+  \end{lstlisting}
+
+  VS.
+
+  \begin{lstlisting}
+  auto ptr = std::make_unique<int>(24);
+  \end{lstlisting}
+
+  \begin{itemize}
+    \item Not convenient to use
+    \item No support for structure cleanup
+    \item Resource not shareable
+  \end{itemize}
+
+  In other words, it's useless garbage.
+
+\end{frame}
+
+\begin{frame}[fragile]{Implementing destructors}
+
+  We need to store a destructor function.
+
+  We need to store metadata.
+
+  We need a custom allocator.
+
+  Introducing smalloc/sfree:
+
+  \begin{lstlisting}
+  void *smalloc($$size_t$$ size, ...);
+  void sfree(void *);
+  #define smart __attribute__((cleanup(sfree_stack)))
+  \end{lstlisting}
+
+  \begin{verbatim}
+|¯¯¯¯¯¯¯¯¯¯|¯¯¯¯¯¯¯¯¯|¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯//¯¯¯¯¯¯|
+| metadata | padding | actual data          //       |
+|__________|_________|_____________________//________|
+^                    ^ returned address (word aligned)
+|_ start of allocated
+   block
+  \end{verbatim}
+
+\end{frame}
+
+\begin{frame}[fragile]{Enhancing smalloc}
+
+  \begin{onlyenv}<1>
+    \begin{lstlisting}
+  void *smalloc($$size_t$$ size);
+    \end{lstlisting}
+  \end{onlyenv}
+
+  \begin{onlyenv}<2>
+    \begin{lstlisting}
+  void *smalloc($$size_t$$ size, void (*dtor)(void*));
+    \end{lstlisting}
+  \end{onlyenv}
+
+  \begin{onlyenv}<3-4>
+    \begin{lstlisting}
+  void *smalloc($$size_t$$ size,
+                void (*dtor)(void*, void*),
+                void *meta,
+                $$size_t$$ metasize);
+    \end{lstlisting}
+  \end{onlyenv}
+
+  \begin{onlyenv}<4>
+    \begin{center}
+      \Huge:'(\normalsize
+    \end{center}
+  \end{onlyenv}
+
+  \begin{onlyenv}<5->
+
+    \begin{lstlisting}
+  struct smalloc_args {
+    $$size_t$$ size;
+    void (*dtor)(void*, void*);
+    struct {
+        void *data;
+        $$size_t$$ metasize;
+    } meta;
+  };
+
+  void *smalloc(struct smalloc_args *);
+
+  #define smalloc(...)                  \
+    ##smalloc(&(struct smalloc_args) {    \
+    ##    __VA_ARGS__                     \
+    ##})
+    \end{lstlisting}
+
+  \end{onlyenv}
+
+\end{frame}
+
+\begin{frame}[fragile]{Enhancing smalloc}
+
+    \begin{lstlisting}
+
+smart int *ptr = smalloc(sizeof (int));
+
+smart int *ptr = smalloc(sizeof (int), my_int_dtor);
+
+smart int *ptr = smalloc(
+        sizeof (int),
+        my_int_dtor,
+        { my_meta, sizeof (my_meta) }
+    );
+
+smart int *ptr = smalloc(
+        .size = sizeof (int),
+        .dtor = my_int_dtor,
+        .meta = { my_meta, sizeof (my_meta) }
+    );
+    \end{lstlisting}
+
+\end{frame}
+
+\plain{Awesome!}
+
+\begin{frame}[fragile]{A look back on what we did}
+
+    \verb|sfree| is the universal deallocator, just like \verb|delete| in C++
+
+    ISO C99:
+    \begin{lstlisting}
+    $$whatever$$ *ptr = smalloc(
+            .size = sizeof ($$whatever$$),
+            .dtor = dtor_whatever
+        );
+    // manipulate ptr
+    sfree(ptr);
+    \end{lstlisting}
+
+    C99 with GNU extensions:
+    \begin{lstlisting}
+    smart $$whatever$$ *ptr = smalloc(
+            .size = sizeof ($$whatever$$),
+            .dtor = dtor_whatever
+        );
+    // manipulate ptr
+    \end{lstlisting}
+
+    We could leave it at that, but...
+
+\end{frame}
+
+\plain{But it's still not enough.}
+
+\begin{frame}[fragile]{Shared pointers}
+
+    Unique pointers (no shared ownership)
+    \begin{lstlisting}
+  smart int *ptr = smalloc(UNIQUE, sizeof (int));
+    \end{lstlisting}
+
+    Shared pointers (shared ownership)
+    \begin{lstlisting}
+  void *sref(void *); // increments reference counter
+
+  smart int *ptr = smalloc(SHARED, sizeof (int));
+  smart int *ref = sref(ptr);
+    \end{lstlisting}
+
+\end{frame}
+
+\begin{frame}[fragile]{Shared pointers: a simple example}
+
+  \begin{lstlisting}
+
+  smart int *ptr = smalloc(SHARED, sizeof (int));
+  if (!ptr)
+      abort();
+
+  *ptr = 42;
+
+  list_add(some_list, sref(ptr));
+  list_add(some_list, sref(ptr));
+  list_add(some_list, sref(ptr));
+
+  \end{lstlisting}
+
+\end{frame}
+
+\begin{frame}[fragile]{Syntax sucks again}
+
+  The boilerplate code strikes back.
+
+  \begin{lstlisting}
+  smart foo *ptr = smalloc(UNIQUE,
+          sizeof (foo),
+          foo_dtor);
+  if (!ptr)
+      abort();
+  *ptr = (foo) {...};
+  \end{lstlisting}
+
+  \pause{}
+
+  \begin{itemize}
+    \item Obligatory NULL check.
+    \item We almost always define a value right away.
+  \end{itemize}
+
+  Nobody wants to do that hundred of times.
+
+\end{frame}
+
+\begin{frame}[fragile]{Adding more syntactic sugar to the cake}
+
+  Let's introduce two macros: \verb|unique_ptr| and \verb|shared_ptr|.
+
+  \begin{lstlisting}
+  smart $$int$$ *yes = unique_ptr($$int$$, 1);
+  smart $$int$$ *yes = unique_ptr($$int$$, .value = 1);
+  \end{lstlisting}
+
+  \begin{lstlisting}
+  typedef struct { float x; float y; } $$point$$;
+
+  smart $$point$$ *zero = unique_ptr($$point$$);
+  smart $$point$$ *p = shared_ptr($$point$$, { 1.3, 4.2 });
+  \end{lstlisting}
+
+\end{frame}
+
+\begin{frame}[fragile]{Handling arrays}
+
+  smalloc/sfree is the equivalent of new/delete in C++.
+
+  There is no equivalent for new[] and delete[].
+
+  We need to change the implementation of smalloc to handle arrays and change
+  \verb|unique_ptr| and \verb|shared_ptr|.
+
+  \pause{}
+
+  \begin{lstlisting}
+smart int *arr = unique_ptr(int[5], {1, 2, 3, 4, 5});
+  \end{lstlisting}
+
+  \pause{}
+
+  \begin{lstlisting}
+for ($$size_t$$ i = 0; i < array_length(arr); ++i)
+    printf("%d\n", arr[i]);
+  \end{lstlisting}
+
+\end{frame}
+
+\plain{What's next?}
+
+\begin{frame}[fragile]{What's next?}
+  \begin{itemize}
+    \item weak pointers
+    \item move semantics for ownership transfer
+  \end{itemize}
+
+  \begin{center}
+    Any sensible contribution is welcome.
+
+    \large \faGithub \normalsize\hspace{0.7em}
+    \url{https://snai.pe/git/libcsptr}
+
+    \large \faEnvelope \normalsize\hspace{0.7em}
+    \verb|franklinmathieu+libcsptr@gmail.com|
+
+    \verb|Snaipe| on \verb|#criterion-dev| @ \url{irc.freenode.net}
+
+  \end{center}
+\end{frame}
+
+\plain{Questions?}
+
+\plain{Addendum}
+
+\begin{frame}[fragile]{Extracting the size of an array}
+
+  Let \verb|T| be a type and \verb|dummy| be a variable of type \verb|T[1]|.
+
+  Then:
+
+  \begin{itemize}
+    \item \verb|sizeof (dummy[0])| is the size in byte of T.
+    \item \verb|sizeof (dummy) / sizeof (dummy[0])| is the lenght of the array if T is an array type, 1 otherwise.
+  \end{itemize}
+
+  Example:
+  \begin{lstlisting}
+  $$T$$[1] v;
+  $$size_t$$ size = sizeof (v[0]);
+  $$size_t$$ lenght = sizeof (v) / sizeof (v[0]);
+  printf("%lu, %lu\n", size, length);
+  \end{lstlisting}
+
+  If T is an int, this prints \verb|4, 1|.
+
+  If T is an int[20], this prints \verb|4, 20|.
+
+  Note: If T is a multidimensional array type, the yielded length is the length of the flattened array.
+
+\end{frame}
+
+\end{document}
