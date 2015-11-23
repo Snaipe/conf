@@ -187,7 +187,7 @@ cleanup:
   Introducing smalloc/sfree:
 
   \begin{lstlisting}
-  void *smalloc($$size_t$$ size, ...);
+  void *smalloc($$size_t$$ size, void (*dtor)(void*));
   void sfree(void *);
   #define smart __attribute__((cleanup(sfree_stack)))
   \end{lstlisting}
@@ -203,21 +203,37 @@ cleanup:
 
 \end{frame}
 
+\begin{frame}[fragile]{Simple implementation}
+  \begin{lstlisting}
+  typedef void ($$f_dtor$$)(void*);
+  typedef struct {
+      $$f_dtor$$ *dtor;
+  } $$s_meta$$;
+
+  void *smalloc($$size_t$$ size, $$f_dtor$$ *dtor) {
+      $$size_t$$ prefix_sz = align(sizeof (s_meta));
+      $$s_meta$$ *ptr = malloc(size + prefix_sz);
+      ptr->dtor = dtor;
+      return (char *) ptr + prefix_sz;
+  }
+
+  void sfree(void *ptr) {
+      $$s_meta$$ *meta = get_meta(ptr);
+      if (meta->dtor) meta->dtor(ptr);
+      free(ptr);
+  }
+  \end{lstlisting}
+\end{frame}
+
 \begin{frame}[fragile]{Enhancing smalloc}
 
   \begin{onlyenv}<1>
-    \begin{lstlisting}
-  void *smalloc($$size_t$$ size);
-    \end{lstlisting}
-  \end{onlyenv}
-
-  \begin{onlyenv}<2>
     \begin{lstlisting}
   void *smalloc($$size_t$$ size, void (*dtor)(void*));
     \end{lstlisting}
   \end{onlyenv}
 
-  \begin{onlyenv}<3-4>
+  \begin{onlyenv}<2-3>
     \begin{lstlisting}
   void *smalloc($$size_t$$ size,
                 void (*dtor)(void*, void*),
@@ -226,13 +242,13 @@ cleanup:
     \end{lstlisting}
   \end{onlyenv}
 
-  \begin{onlyenv}<4>
+  \begin{onlyenv}<3>
     \begin{center}
       \Huge:'(\normalsize
     \end{center}
   \end{onlyenv}
 
-  \begin{onlyenv}<5->
+  \begin{onlyenv}<4->
 
     \begin{lstlisting}
   struct smalloc_args {
@@ -435,7 +451,10 @@ for ($$size_t$$ i = 0; i < array_length(arr); ++i)
 
 \plain{Questions?}
 
-\plain{Addendum}
+\appendix
+\section{Addendum}
+
+\subsection{Extracting the size of an array}
 
 \begin{frame}[fragile]{Extracting the size of an array}
 
@@ -444,8 +463,8 @@ for ($$size_t$$ i = 0; i < array_length(arr); ++i)
   Then:
 
   \begin{itemize}
-    \item \verb|sizeof (dummy[0])| is the size in byte of T.
-    \item \verb|sizeof (dummy) / sizeof (dummy[0])| is the lenght of the array if T is an array type, 1 otherwise.
+    \item \verb|sizeof (dummy[0])| is the size in bytes of the compound type of T.
+    \item \verb|sizeof (dummy) / sizeof (dummy[0])| is the length of the array if T is an array type, 1 otherwise.
   \end{itemize}
 
   Example:
