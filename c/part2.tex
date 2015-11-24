@@ -1,0 +1,795 @@
+\documentclass[10pt]{beamer}
+
+\usetheme{m}
+
+\usepackage{fontawesome}
+\usepackage{setspace}
+\usepackage{color}
+\usepackage{listings}
+\usepackage{booktabs}
+\usepackage[scale=2]{ccicons}
+\usepackage{textpos}
+
+\setlength{\TPHorizModule}{1cm}
+\setlength{\TPVertModule}{1cm}
+
+\definecolor{pgrey}{rgb}{0.46,0.45,0.48}
+\definecolor{pblue}{rgb}{0.13,0.13,1}
+\definecolor{pgreen}{rgb}{0,0.5,0}
+
+\lstdefinestyle{C++}
+{
+    language=C++,
+    showspaces=false,
+    showtabs=false,
+    showstringspaces=false,
+    basicstyle=\ttfamily,
+    keywordstyle=\color{magenta}\ttfamily,
+    stringstyle=\color{pgreen}\ttfamily,
+    commentstyle=\color{pgrey}\ttfamily,
+    morecomment=[l][\color{pgrey}]{\#},
+    moredelim=[il][\color{pgrey}]{\#\#\#},
+    moredelim=[is][\textcolor{pblue}]{$$}{$$},
+    morekeywords={Test,TestSuite,ParameterizedTest,ParameterizedTestParameters}
+}
+
+\lstdefinestyle{Rust}
+{
+    language=C++,
+    showspaces=false,
+    showtabs=false,
+    showstringspaces=false,
+    basicstyle=\ttfamily,
+    keywordstyle=\color{magenta}\ttfamily,
+    stringstyle=\color{pgreen}\ttfamily,
+    commentstyle=\color{pgrey}\ttfamily,
+    moredelim=[il][\color{pgrey}]{\#\#},
+    moredelim=[is][\textcolor{pblue}]{$$}{$$},
+    morekeywords={fn}
+}
+
+\lstdefinestyle{Java}
+{
+    language=Java,
+    showspaces=false,
+    showtabs=false,
+    showstringspaces=false,
+    basicstyle=\ttfamily,
+    keywordstyle=\color{magenta}\ttfamily,
+    stringstyle=\color{pgreen}\ttfamily,
+    commentstyle=\color{pgrey}\ttfamily,
+    morecomment=[l][\color{pgrey}]{\@},
+    moredelim=[il][\color{pgrey}]{\#\#},
+    moredelim=[is][\textcolor{pblue}]{$$}{$$},
+}
+\lstset{style=C++}
+
+\usepackage{pgfplots}
+\usepgfplotslibrary{dateplot}
+
+\title{Experiments on building high level abstractions with C\newline\newline Part 2: Modern Unit Testing}
+\subtitle{A tale of pain and wonder}
+\date{4/12/2015}
+\author{Franklin "Snaipe" Mathieu -- 2017}
+\institute{EPITA -- GCONFS}
+%\titlegraphic{\hfill\includegraphics[height=1.5cm]{logo.pdf}}
+
+\begin{document}
+
+\maketitle
+
+\section{The sorry state of C unit testing frameworks}
+
+\plain{Unit testing is awesome!}
+
+\begin{frame}[fragile]{Unit testing is awesome!}
+
+  Java + JUnit:
+
+  \begin{lstlisting}[style=Java]
+  @Test
+  public void testAThing() {
+      Assert.assertTrue(true);
+  }
+  \end{lstlisting}
+
+  Python + unittest:
+
+  \begin{lstlisting}[language=Python]
+  class TestAThing(unittest.TestCase):
+    def test(self):
+      self.assert(true)
+  \end{lstlisting}
+
+  Rust + cargo test:
+  \begin{lstlisting}[style=Rust]
+  ###[test]
+  fn testAThing() {
+      assert!(true);
+  }
+  \end{lstlisting}
+
+\end{frame}
+
+\begin{frame}[fragile]{What about C?}
+
+  Yay, what about C?
+
+  \begin{onlyenv}<1-4>
+  \only<2-4>{test1.c:}
+  \begin{lstlisting}
+  void testAThing(void) {
+      assert(1);
+  }
+  \end{lstlisting}
+  \end{onlyenv}
+
+  \begin{onlyenv}<3-4>
+  test1.h:
+  \begin{lstlisting}
+  #ifndef TEST_1_H_
+  # define TEST_1_H_
+  void testAThing(void);
+  #endif // !TEST_1_H_
+  \end{lstlisting}
+  \end{onlyenv}
+
+  \begin{onlyenv}<4>
+  main.c:
+  \begin{lstlisting}
+  int main(void) {
+      testAThing();
+      return 0;
+  }
+  \end{lstlisting}
+  \end{onlyenv}
+
+  \begin{onlyenv}<5>
+  test1.c:
+  \begin{lstlisting}
+  void testAThing(void) { /* */ }
+  void testSomethingElse(void) { /* */ }
+  \end{lstlisting}
+
+  test1.h:
+  \begin{lstlisting}
+  #ifndef TEST_1_H_
+  # define TEST_1_H_
+  void testAThing(void);
+  void testSomethingElse(void);
+  #endif // !TEST_1_H_
+  \end{lstlisting}
+
+  main.c:
+  \begin{lstlisting}
+  int main(void) {
+      testAThing();
+      testSomethingElse();
+      return 0;
+  }
+  \end{lstlisting}
+  \end{onlyenv}
+
+\end{frame}
+
+\plain{Whoops.}
+
+\plain{Let's use a real framework!}
+
+\begin{frame}[fragile]{Let's use CUnit!}
+
+  \begin{lstlisting}
+void test(void) { /* */ }
+
+int main(void) {
+    if (CUE_SUCCESS != CU_initialize_registry())
+        return CU_get_error();
+
+    CU_pSuite s = CU_add_suite("suite", NULL, NULL);
+    if (NULL == s
+      || (NULL == CU_add_test(s, "test", test)))
+        goto cleanup;
+
+    CU_basic_set_mode(CU_BRM_VERBOSE);
+    CU_basic_run_tests();
+
+cleanup:
+    CU_cleanup_registry();
+    return CU_get_error();
+}
+  \end{lstlisting}
+
+\end{frame}
+
+\plain{How about Check?}
+
+\begin{frame}[fragile]{How about Check?}
+
+  \begin{onlyenv}<1->
+  Check and plain C:
+  \begin{lstlisting}
+  START_TEST (test_name)
+  {
+    /* unit test code */
+  }
+  END_TEST
+  \end{lstlisting}
+  \end{onlyenv}
+
+  \begin{onlyenv}<3->
+  Check, m4, and C:
+  \begin{lstlisting}
+  # suite The Suite
+  # tcase The Test Case
+
+  # test  the_test
+    const char msg[] = "Hello, world!\n";
+
+    int nc = printf("%s", msg);
+    fail_unless(nc == (sizeof msg - 1));
+  \end{lstlisting}
+  \end{onlyenv}
+
+  \begin{onlyenv}<2>
+  \begin{textblock}{3}(-1,1)
+    \includegraphics[height=3cm]{wat.png}
+  \end{textblock}
+  \end{onlyenv}
+
+  \begin{onlyenv}<4->
+  \begin{textblock}{3}(-1,-1)
+    \includegraphics[height=3cm]{wat.png}
+  \end{textblock}
+  \end{onlyenv}
+
+  \begin{onlyenv}<5->
+  \begin{textblock}{3}(9,-11)
+    \includegraphics[angle=120,height=3.5cm]{wat.png}
+  \end{textblock}
+  \end{onlyenv}
+
+  \begin{onlyenv}<6->
+  \begin{textblock}{1}(-1.5,-5)
+    \includegraphics[angle=-90,totalheight=1.5cm]{wat.png}
+  \end{textblock}
+  \end{onlyenv}
+
+\end{frame}
+
+\plain{Let's step back.}
+
+\begin{frame}[fragile]{What do we want?}
+
+  We want:
+  \begin{itemize}[<+-|alert@+>]
+    \item Automatic test registration
+    \item Industrial-grade quality
+    \item Let the user in full control
+    \item Compatibility on all major platforms (Linux, Windows, Darwin, FreeBSD)
+    \item And most importantly: KISS interface, easy and pleasant to use
+  \end{itemize}
+
+\end{frame}
+
+\section{Implementing Criterion}
+
+\begin{frame}[fragile]{A short look at executable file formats}
+
+  ELF (Linux), PE (Windows), Mach-O (Darwin):
+  \begin{verbatim}
+  /¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯\
+  |                    HEADER                    |
+  |______________________________________________|
+  |                   SEGMENTS                   |
+  |       /¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯\     |
+  |       |            SECTION             |     |
+  |       |________________________________|     |
+  |       |                                |     |
+  |       |            SECTION             |     |
+  |       |________________________________|     |
+  |       |                                |     |
+  |       |            SECTION             |     |
+  |       \________________________________/     |
+  |                                              |
+  \______________________________________________/
+  \end{verbatim}
+\end{frame}
+
+\begin{frame}[fragile]{Sections}
+
+  \begin{itemize}[<+-|alert@+>]
+    \item Sections may contain arbitrary data.
+    \item Nonstandard sections are allowed and may hold user data.
+    \item The begining and end of a section are known at link time,
+          and run time if the binary is not stripped.
+  \end{itemize}
+
+  \begin{onlyenv}<4->
+  We can use this to automatically discover our tests!
+
+  Put our test data in a section, then iterate over the section with pointer
+  arithmetic.
+  \end{onlyenv}
+
+\end{frame}
+
+\begin{frame}[fragile]{Doing things manually}
+
+  User code:
+  \begin{lstlisting}
+struct test {
+  const char *name;
+  void (*fn)(void);
+};
+
+static void my_test_fn(void) { /* */ }
+
+const static struct test my_test_data = {
+        .name "my_test",
+        .fn = my_test_fn
+    };
+
+__attribute__((section("tests")))
+const static struct test *my_test_ptr = &my_test_data;
+
+  \end{lstlisting}
+
+\end{frame}
+
+\begin{frame}[fragile]{Doing things manually}
+
+  \begin{lstlisting}
+#define Test(Name)                              \
+###    static void Name ## _fn(void);              \
+###    const static struct test Name ## _data = {  \
+###            .name #Name,                        \
+###            .fn = Name ## _fn                   \
+###        };                                      \
+###    __attribute__((section("tests")))           \
+###    const static struct test *Name ## _ptr      \
+###        = &Name ## _data;                       \
+###    static void Name ## _fn(void)
+  \end{lstlisting}
+
+  \begin{onlyenv}<2->
+  \begin{lstlisting}
+  Test(my_test) { /* */ }
+  \end{lstlisting}
+  \end{onlyenv}
+\end{frame}
+
+\begin{frame}[fragile]{Tackling the missing main}
+
+  Library code:
+  \begin{lstlisting}
+  static struct test *__start_tests;
+  static struct test *__stop_tests;
+
+  int main(void) {
+      for (struct test **t = &__start_tests;
+           t < &__stop_tests;
+           ++t) {
+
+          if (*t == NULL)
+              continue;
+
+          printf("Running test '%s'.\n'", (*t)->name);
+          (*t)->fn();
+      }
+      return 0;
+  }
+  \end{lstlisting}
+
+\end{frame}
+
+\begin{frame}[fragile]{Tackling the missing main}
+
+  Where do we put the main? \pause{}
+
+  We could define a \verb|CRITERION_DEFINE_MAIN| macro, but this is suboptimal.
+
+  Instead, let's remember that \verb|main| is just a symbol, and should get
+  resolved by the linker wherever it is.
+
+  \pause{}
+
+  We can then put our main in a separate library, and this ``default'' main will
+  be picked up if the user does not define their own main.
+
+\end{frame}
+
+\begin{frame}[fragile]{Looking back at what we did}
+
+  User code:
+  \begin{lstlisting}
+  #include <criterion/criterion.h>
+
+  Test(foo) {}
+
+  Test(bar) {
+      assert(0);
+  }
+  \end{lstlisting}
+
+  Usage:
+  \begin{verbatim}
+  $ cc -o test test.c -lcriterion
+  $ ./test
+  Running test 'foo'.
+  Running test 'bar'.
+  test: test.c:6: main: Assertion `0' failed.
+  \end{verbatim}
+\end{frame}
+
+\plain{Wow.}
+
+\section{Enhancing the library}
+
+\begin{frame}[fragile]{Sandboxing for the greater good}
+  A unit test should be self-contained and isolated from other parts of the system.
+
+  For the reporting to be relevant, I expect my test runner to be able to complete
+  gracefully all the tests, even if they crash.
+
+  \pause{}
+
+  In other words, this shouldn't prevent the other tests from running:
+  \begin{lstlisting}
+  Test(crash) {
+      *((int *) NULL) = 42;
+  }
+  \end{lstlisting}
+
+  \pause{}
+
+  We need to sandbox each test.
+
+  But how could we recover from errors such as a segmentation fault?
+
+  \pause{}
+
+  Short answer: you can't. After a sigsegv hits, the best thing you can do is exit.
+
+\end{frame}
+
+\begin{frame}[fragile]{Forking around at the speed of sound}
+
+  Let's isolate the test into its own forked process!
+
+  \begin{itemize}
+    \item The test runs in its own address space
+    \item File handles/descriptors are bound to the process
+    \item Threads are local to the process
+    \item All of the above points are duplicated from the parent process
+    \item For parent/child communication we use a pipe
+  \end{itemize}
+
+  With this, even in the event of major corruption or the end of the universe,
+  we are guaranteed that the test runner will always be up and running until
+  the very end.
+
+  \pause{}
+
+  Problem: there is no \verb|fork()| or \verb|pipe(int[2])| on Windows...
+
+  We would like to avoid using Cygwin.
+
+\end{frame}
+
+\begin{frame}[fragile]{Woe32 strikes yet again}
+
+  Welcome to hell.
+
+  How Cygwin implements fork() in a nutshell:
+  \begin{itemize}
+    \item Create a suspended process
+    \item Copy all memory maps from the parent to the child
+    \item Copy processor context, set the IP register
+    \item Resume child and return
+  \end{itemize}
+
+  \pause{}
+
+  However, we can't do this, because we do not control any of the initialization
+  normally provided by the cygwin toolchain.
+
+  It's also horrible to debug.
+
+\end{frame}
+
+\begin{frame}[fragile]{Woe32 strikes yet again}
+
+  What I ended up doing:
+
+  \begin{itemize}
+    \item Create a suspended process
+    \item Copy a custom heap from the parent to the child
+    \item Copy test data into a named mapping
+    \item Resume child, child opens the mapping and initialize itself.
+    \item In parent, wait for the child to be initialized, then return its PID
+  \end{itemize}
+
+  \pause{}
+
+  This is easier to maintain and debug -- however, we can't no longer
+  universally guarantee to have the test inheriting its parent's address space.
+
+  \pause{}
+
+  This is why we introduce a custom heap, and \verb|cr_malloc|/\verb|cr_free|
+  to manipulate this heap on Windows, or simply call \verb|malloc|/\verb|free|
+  on other systems.
+
+\end{frame}
+
+\begin{frame}[fragile]{Enhancing the API}
+
+  \begin{onlyenv}<1>
+  \begin{lstlisting}
+  Test(bar) {}
+
+  Test(foo) {
+      assert(0);
+  }
+  \end{lstlisting}
+  \end{onlyenv}
+
+  \begin{onlyenv}<2>
+  \begin{lstlisting}
+  Test(suite, bar) {}
+
+  Test(suite, foo) {
+      assert(0);
+  }
+  \end{lstlisting}
+  \end{onlyenv}
+
+  \begin{onlyenv}<3>
+  \begin{lstlisting}
+  Test(suite, crash, .signal = SIGSEGV) {
+      *((int *) NULL) = 42;
+  }
+
+  Test(suite, foo, .description = "Testing the foos") {
+      assert(0);
+  }
+  \end{lstlisting}
+  \end{onlyenv}
+
+  \begin{onlyenv}<4>
+  \begin{lstlisting}
+  void setup(void) { /* */ }
+  void teardown(void) { /* */ }
+
+  Test(suite, crash,
+        .signal = SIGSEGV,
+        .init = setup,
+        .fini = teardown) {
+      *((int *) NULL) = 42;
+  }
+
+  Test(suite, foo,
+        .description = "Testing the foos",
+        .init = setup,
+        .fini = teardown) {
+      assert(0);
+  }
+  \end{lstlisting}
+  \end{onlyenv}
+
+  \begin{onlyenv}<5>
+  \begin{lstlisting}
+  void setup(void) { /* */ }
+  void teardown(void) { /* */ }
+
+  TestSuite(suite, .init = setup, .fini = teardown);
+
+  Test(suite, crash, .signal = SIGSEGV) {
+      *((int *) NULL) = 42;
+  }
+
+  Test(suite, foo, .description = "Testing the foos") {
+      assert(0);
+  }
+  \end{lstlisting}
+  \end{onlyenv}
+
+  \begin{onlyenv}<6>
+  \begin{lstlisting}
+  void setup(void) { /* */ }
+  void teardown(void) { /* */ }
+
+  TestSuite(suite, .init = setup, .fini = teardown);
+
+  Test(suite, crash, .signal = SIGSEGV) {
+      *((int *) NULL) = 42;
+  }
+
+  Test(suite, foo, .description = "Testing the foos") {
+      cr_assert(1);
+      cr_assert(0, "Assertion message");
+  }
+  \end{lstlisting}
+  \end{onlyenv}
+
+  \begin{onlyenv}<7>
+  \begin{lstlisting}
+  void setup(void) { /* */ }
+  void teardown(void) { /* */ }
+
+  TestSuite(suite, .init = setup, .fini = teardown);
+
+  Test(suite, crash, .signal = SIGSEGV) {
+      *((int *) NULL) = 42;
+  }
+
+  Test(suite, foo, .description = "Testing the foos") {
+      cr_assert(1);
+      cr_expect_eq(1, 0); // fails but does not abort
+      cr_assert(0, "A %s format string", "cool");
+  }
+  \end{lstlisting}
+  \end{onlyenv}
+
+\end{frame}
+
+\section{Providing sane defaults and reporting tools}
+
+\begin{frame}[fragile]{CLI and friends}
+
+  Since we control the main, we can provide
+  sane tooling that every programmer should expect of
+  their unit test runner:
+
+  \begin{itemize}
+    \item Control the verbosity level (\verb|--verbose[=N]|)
+    \item Filtering the running tests with pattern matching (\verb|--pattern PATTERN|)
+    \item List the tests (\verb|--list|)
+    \item Fail fast: if one test fails, don't run the others (\verb|--fail-fast|)
+    \item And more...
+  \end{itemize}
+
+\end{frame}
+
+\begin{frame}[fragile]{Reporting formats}
+
+  In addition to the normal CLI report, we can add multiple test report formats:
+
+  \begin{itemize}
+    \item TAP -- Test Anything Protocol (Compatible with a lot of test drivers)
+    \item JUnit XML (Compatible with CI services like Jenkins)
+    \item Json (For custom webservices)
+  \end{itemize}
+
+\end{frame}
+
+\section{Raising the bar on the testing tools}
+
+\begin{frame}[fragile]{Multiple language compatibility}
+
+  Tests in \only<1>{C}\only<2>{C++}\only<3>{Objective-C}\only<4->{*}:
+
+  \begin{lstlisting}
+  #include <criterion/criterion.h>
+
+  Test(sample, simple) {
+      cr_assert(0, "Hello, World.");
+  }
+  \end{lstlisting}
+
+  \begin{onlyenv}<4>
+  The interface is unified, but there are extensions for C++ (assertions on
+  exceptions, catching unhandled exceptions, ...)
+  \end{onlyenv}
+
+\end{frame}
+
+\begin{frame}[fragile]{Parameterized tests}
+
+  Parameterized tests are tests that take a parameter from a finite dataset.
+
+  \begin{lstlisting}
+  ParameterizedTestParameters(suite, test) {
+      static int arr[] = { 1, 2, 3 };
+      $$size_t$$ len = sizeof (arr) / sizeof (int);
+      return cr_make_param_array(int, arr, len);
+  }
+
+  ParameterizedTest(int *param, suite, test) {
+      cr_assert_lt(*param, 4);
+  }
+  \end{lstlisting}
+
+  \pause{}
+
+  Useful for testing and validating the \textbf{same logic} over a \textbf{finite set of data}.
+
+\end{frame}
+
+\begin{frame}[fragile]{Theories}
+
+  Theories are another kind of test, designed for validating a result from
+  a set of axioms.
+
+  \pause{}
+
+  Useful for testing properties that makes sense for \textbf{any kind of data}.
+
+  \pause{}
+
+  Vanilla unit testing:
+
+  \begin{lstlisting}
+  Test(algebra, mul) {
+    cr_assert_eq(div(mul(2, 3), 3), 2);
+  }
+  \end{lstlisting}
+
+  But this test does not really make sense!
+
+  Should test for any kind of values, not just 2 and 3.
+
+\end{frame}
+
+\begin{frame}[fragile]{Theories}
+
+  With a theory:
+
+  \begin{lstlisting}
+  Theory((int lhs, int rhs), algebra, mul) {
+      cr_assume_neq(rhs, 0);
+      cr_assert_eq(div(mul(lhs, rhs) rhs), lhs);
+  }
+  \end{lstlisting}
+
+  \pause{}
+
+  When writing the test, we don't really care about \verb|lhs| or \verb|rhs|
+
+  \pause{}
+
+  However, we \textbf{assume} that \verb|rhs| is nonzero.
+
+  \pause{}
+
+  We pass interesting values to \verb|lhs| and \verb|rhs|.
+
+  \begin{lstlisting}
+  TheoryDatapoints(algebra, mul) = {
+      DataPoints(int, 0, -1, 1, INT_MAX, INT_MIN),
+      DataPoints(int, 0, -1, 1, INT_MAX, INT_MIN),
+  };
+  \end{lstlisting}
+
+\end{frame}
+
+\plain{What's next?}
+
+\begin{frame}[fragile]{What's next?}
+  \begin{itemize}
+    \item Better float assertions (strategy choice between ULPs, Absolute epsilons, ...)
+    \item Concolic testing
+    \item Testing for embedded programming
+  \end{itemize}
+
+  \begin{center}
+    \includegraphics[height=50pt]{criterion.png}
+
+    \small (Logo designed by @pbouigue on twitter) \normalsize
+
+    Any sensible contribution is welcome.
+
+    \large \faGithub \normalsize\hspace{0.7em}
+    \url{https://snai.pe/git/criterion}
+
+    \large \faEnvelope \normalsize\hspace{0.7em}
+    \verb|franklinmathieu+criterion@gmail.com|
+
+    \verb|Snaipe| on \verb|#criterion| or \verb|#criterion-dev| @ \url{irc.freenode.net}
+
+  \end{center}
+\end{frame}
+
+\plain{Questions?}
+
+\end{document}
