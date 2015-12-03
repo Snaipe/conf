@@ -1,0 +1,461 @@
+\documentclass[10pt]{beamer}
+
+\usetheme{m}
+
+\let\Tiny\tiny
+
+\usepackage{fontawesome}
+\usepackage{setspace}
+\usepackage{color}
+\usepackage{listings}
+\usepackage{booktabs}
+\usepackage[scale=2]{ccicons}
+\usepackage{textpos}
+\usepackage{fancyvrb}
+
+\newcommand{\vrbalert}[2][]{%
+  \if\relax\detokenize{#1}\relax%
+    \alert{#2}%
+  \else
+    \alert<#1>{#2}%
+  \fi}
+
+\setlength{\TPHorizModule}{1cm}
+\setlength{\TPVertModule}{1cm}
+
+\definecolor{pgrey}{rgb}{0.46,0.45,0.48}
+\definecolor{pblue}{rgb}{0.13,0.13,1}
+\definecolor{pgreen}{rgb}{0,0.5,0}
+
+\lstdefinestyle{C++}
+{
+    language=C++,
+    showspaces=false,
+    showtabs=false,
+    showstringspaces=false,
+    basicstyle=\ttfamily,
+    keywordstyle=\color{magenta}\ttfamily,
+    stringstyle=\color{pgreen}\ttfamily,
+    commentstyle=\color{pgrey}\ttfamily,
+    morecomment=[l][\color{pgrey}]{\#},
+    moredelim=[il][\color{pgrey}]{\#\#\#},
+    moredelim=[is][\textcolor{pblue}]{$$}{$$},
+}
+
+\lstset{style=C++}
+
+\usepackage{pgfplots}
+\usepgfplotslibrary{dateplot}
+
+\title{Experiments on building high level abstractions with C\newline\newline Part 3: Reflection}
+\subtitle{Mirror mirror on the wall, am I not the prettiest of them all?}
+\date{4/12/2015}
+\author{Franklin "Snaipe" Mathieu -- 2017}
+\institute{EPITA -- GCONFS}
+%\titlegraphic{\hfill\includegraphics[height=1.5cm]{logo.pdf}}
+
+\begin{document}
+
+\maketitle
+
+\section{What is reflection?}
+
+\begin{frame}[fragile]{Definitions}
+  $$\text{Reflection} = \only<1>{\text{\_\_\_\_\_\_\_\_\_\_\_\_}}\only<2->{\text{\alert<2>{Introspection}}} + \only<1-2>{\text{\_\_\_\_\_\_\_\_\_\_\_}}\only<3->{\text{\alert<3>{Intercession}}}$$
+
+  \only<2->{\alert<2>{Introspection}: The ability of a program to examine itself} ~
+
+  \only<3->{\alert<3>{Intercession}: The ability of a program to change its state and meaning} ~
+  \only<1-2>{\newline}
+
+  \only<4>{Known implementors are Java, C\#, Python, Ruby, PHP, ...} ~
+\end{frame}
+
+\begin{frame}[fragile]{Reflection}
+
+  To achieve reflection, we need sufficient information on various actors:
+
+  \begin{itemize}
+    \item Types
+    \item Functions
+    \item Variables
+  \end{itemize}
+
+  \pause{}
+
+  Thankfully, debuggers also need these informations to be useful.
+
+\end{frame}
+
+\section{Implementing Insight}
+
+\begin{frame}[fragile]{DWARF}
+
+  DWARF is a standardized debugging format, designed along with ELF.
+
+  Information is stored (and described) as a tree, but contains backreferences
+  on nodes, making it effectively more like a graph.
+
+  \pause{}
+
+  libdwarf can be used to easily parse and iterate over the tree.
+
+\end{frame}
+
+\begin{frame}[fragile]{Anatomy of a simple C program}
+
+  test.c:
+  \begin{lstlisting}
+  struct T { int field; double other_field; };
+  static struct T var;
+
+  int main(void) {}
+  \end{lstlisting}
+
+  \pause{}
+
+  DWARF information:
+  \begin{Verbatim}[commandchars=\\\{\},fontsize=\small,frame=single]
+  DW_TAG_compile_unit
+    DW_AT_producer  GNU C11 5.2.0 -mtune=generic 
+                      -march=x86-64 -g
+    DW_AT_language  DW_LANG_C99
+    DW_AT_name      test.c
+    DW_AT_comp_dir  /home/snaipe
+    DW_AT_low_pc    0x004004b6
+    DW_AT_high_pc   <offset-from-lowpc>11
+    DW_AT_stmt_list 0x00000000
+  \end{Verbatim}
+\end{frame}
+
+\begin{frame}[fragile]{Anatomy of a simple C program}
+\begin{Verbatim}[commandchars=\\\{\},fontsize=\small,frame=single]
+<0x2d> DW_TAG_structure_type
+         DW_AT_name: \vrbalert[2]{"T"}
+         DW_AT_byte_size: \vrbalert[3]{0x10}
+         DW_AT_decl_file: \vrbalert[4]{0x1}
+         DW_AT_decl_line: \vrbalert[4]{0x1}
+<0x37>   DW_TAG_member
+           DW_AT_name: \vrbalert[2]{"field"}
+           DW_AT_decl_file: \vrbalert[4]{0x1}
+           DW_AT_decl_line: \vrbalert[4]{0x1}
+           DW_AT_type: \vrbalert[6]{<0x50>}
+           DW_AT_data_member_location: \vrbalert[5]{0}
+<0x43>   DW_TAG_member
+           DW_AT_name: \vrbalert[2]{"other_field"}
+           DW_AT_decl_file: \vrbalert[4]{0x1}
+           DW_AT_decl_line: \vrbalert[4]{0x1}
+           DW_AT_type: \vrbalert[6]{<0x57>}
+           DW_AT_data_member_location: \vrbalert[5]{8}
+\end{Verbatim}
+\end{frame}
+
+\begin{frame}[fragile]{Anatomy of a simple C program}
+\begin{Verbatim}[commandchars=\\\{\},fontsize=\small,frame=single]
+\vrbalert{<0x50>} DW_TAG_base_type
+         DW_AT_byte_size: 0x4
+         DW_AT_encoding: DW_ATE_signed
+         DW_AT_name: "int"
+\vrbalert{<0x57>} DW_TAG_base_type
+         DW_AT_byte_size: 0x8
+         DW_AT_encoding: DW_ATE_float
+         DW_AT_name: "double"
+\end{Verbatim}
+\end{frame}
+
+\begin{frame}[fragile]{Anatomy of a simple C program}
+\begin{Verbatim}[commandchars=\\\{\},fontsize=\small,frame=single]
+<0x5e> DW_TAG_subprogram
+         DW_AT_external: yes(1)
+         DW_AT_name: "main"
+         DW_AT_decl_file: 0x1
+         DW_AT_decl_line: 0x4
+         DW_AT_prototyped: yes(1)
+         DW_AT_type: <0x50>
+         DW_AT_low_pc: \vrbalert[2]{0x004004b6}
+         DW_AT_high_pc: \vrbalert[2]{<offset-from-lowpc>11}
+         DW_AT_frame_base: \vrbalert[3]{len 0x1: DW_OP_call_frame_cfa}
+<0x7b> DW_TAG_variable
+         DW_AT_name: "var"
+         DW_AT_decl_file: 0x1
+         DW_AT_decl_line: 0x2
+         DW_AT_type: <0x2d>
+         DW_AT_location: \vrbalert[3]{len 0x9: DW_OP_addr 0x006008c0}
+\end{Verbatim}
+\end{frame}
+
+\begin{frame}[fragile]{Implementation}
+
+  We need to process this tree and turn it into usable metadata for us.
+
+  \pause{}
+
+  \begin{lstlisting}
+typedef struct insight_type_s   *$$insight_type_info$$;
+typedef struct insight_field_s  *$$insight_field_info$$;
+  \end{lstlisting}
+
+  \pause{}
+
+  \begin{lstlisting}
+$$insight_type_info$$ insight_typeof_str(const char *);
+$$insight_type_info$$ insight_typeof_addr(void *);
+  \end{lstlisting}
+  \pause{}
+  \begin{lstlisting}
+const char *insight_type_name($$insight_type_info$$);
+$$size_t$$ insight_type_size($$insight_type_info$$);
+  \end{lstlisting}
+  \pause{}
+  \begin{lstlisting}
+$$insight_field_info$$ insight_field($$insight_type_info$$,
+                                 const char *);
+void insight_field_set($$insight_field_info$$,
+                       void *instance, void *data,
+                       size_t size);
+void insight_field_get($$insight_field_info$$,
+                       void *instance, const void *data,
+                       size_t size);
+  \end{lstlisting}
+
+\end{frame}
+
+\begin{frame}[fragile]{Introducing type\_of}
+
+  we need a practical way of getting the type of anything.
+
+  \pause{}
+
+  GNU C \verb|__typeof__| is the perfect candidate.
+
+  \begin{onlyenv}<2>
+  \small\begin{lstlisting}
+#define type_of(Thing) ({ \
+###    static __typeof__(Thing) *insight_typeof_dummy = NULL; \
+###    insight_typeof_addr(&insight_typeof_dummy); \
+###  })
+  \end{lstlisting}\normalsize
+  \end{onlyenv}
+
+  \begin{onlyenv}<3>
+  \small\begin{lstlisting}
+#ifdef __GNUC__
+# define type_of(Thing) ({ \
+###    static __typeof__(Thing) *insight_typeof_dummy = NULL; \
+###    insight_typeof_addr(&insight_typeof_dummy); \
+###  })
+#else
+# define type_of(Thing) (insight_typeof_str(#Thing))
+#endif
+  \end{lstlisting}\normalsize
+  \end{onlyenv}
+
+\end{frame}
+
+\begin{frame}[fragile]{Some short examples}
+  \begin{lstlisting}
+  insight_type_info void_t = type_of(void);
+  insight_type_info int_t = type_of(int);
+  insight_type_info struct_t = type_of(struct foo);
+  \end{lstlisting}
+
+  \pause{}
+
+  \begin{lstlisting}
+  insight_type_info int_t = type_of(1);
+  insight_type_info long_t = type_of(1L);
+  insight_type_info double_t = type_of(3.14);
+  insight_type_info char_arr_t = type_of("Foo");
+  \end{lstlisting}
+\end{frame}
+
+\begin{frame}[fragile]{Some short examples}
+
+  \begin{lstlisting}
+struct T {
+  int i;
+};
+
+int main(void) {
+  struct test_struct t = {24};
+
+  insight_type_info type = type_of(struct T);
+  insight_field_info field = insight_field(type, "i");
+
+  printf("t.i = %d\n", t.i);
+  int i = 42;
+  insight_field_set(field, &t, &i, sizeof (i));
+  printf("t.i = %d\n", t.i);
+
+  return 0;
+}
+  \end{lstlisting}
+\end{frame}
+
+\plain{What about C++?}
+
+\begin{frame}[fragile]{On the case of C++}
+
+  We can build a similar API for C++:
+
+  \begin{lstlisting}
+class StructInfo : virtual public TypeInfo,
+                   virtual public Container {
+public:
+  virtual Range<MethodInfo> methods() const = 0;
+  virtual MethodInfo& method(std::string) const = 0;
+  virtual Range<FieldInfo> fields() const = 0;
+  virtual FieldInfo& field(std::string name) const = 0;
+  virtual WeakRange<StructInfo> supertypes() const = 0;
+  virtual StructInfo& supertype(std::string) const = 0;
+  virtual bool is_supertype(const TypeInfo&) const = 0;
+  virtual bool is_ancestor(const TypeInfo&) const = 0;
+};
+  \end{lstlisting}
+
+\end{frame}
+
+\begin{frame}[fragile]{Some C++ examples}
+
+  \begin{lstlisting}
+class TestClass {
+public:
+    TestClass(int f);
+    int get_field();
+private:
+    int field;
+};
+  \end{lstlisting}
+
+  \pause{}
+
+  \begin{lstlisting}
+Insight::StructInfo& type = type_of(TestClass);
+  \end{lstlisting}
+
+  \pause{}
+
+  \begin{lstlisting}
+int& field = type.field("field").get<int>(instance);
+field = 55;
+  \end{lstlisting}
+
+  \begin{lstlisting}
+type.method("get_field").call<int>(instance)
+  \end{lstlisting}
+
+\end{frame}
+
+\begin{frame}[fragile]{Using reflection for foreign interfaces}
+
+  We could:
+
+  \begin{itemize}[<+-|alert@+>]
+    \item load an external library and automatically discover what's in it.
+    \item Use functions and types without their definitions
+    \item Call functions in language A from language B
+    \item Manipulate concepts foreign to the current language (e.g. C++ classes
+          in C code)
+    \item Monkey-patch our types and vtables for profit
+  \end{itemize}
+
+  \pause{}
+
+  These are not (yet) implemented, but are entierly possible.
+
+\end{frame}
+
+\section{Implementing annotations}
+
+\begin{frame}[fragile]{Annotations for class metadata}
+
+  \begin{onlyenv}<1>
+  Java:
+  \begin{lstlisting}[language=Java]
+  @Entity
+  @Table(name = "events")
+  public class Event {
+      @Id
+      private long id;
+
+      private String name;
+  }
+  \end{lstlisting}
+  \end{onlyenv}
+
+  \begin{onlyenv}<2>
+  C++:
+  \begin{lstlisting}
+  $(Entity)
+  $(Table, .name = "events")
+  struct event {
+      $(Id)
+      size_t id;
+
+      std::string name;
+  };
+  \end{lstlisting}
+  \end{onlyenv}
+
+\end{frame}
+
+\plain{O\_o}
+
+\begin{frame}[fragile]{Annotations for class metadata}
+
+  \verb|$| is a nonstandard albeit valid identifier on the GNU compiler family.
+
+  \pause{}
+
+  We define the following:
+
+  \begin{lstlisting}
+  #define $(Name, ...)                        \
+  ###  static const struct Name <unique_id> = {  \
+  ###      __VA_ARGS__                           \
+  ###  };
+  \end{lstlisting}
+
+  \pause{}
+
+  The static constant holds the actual metadata.
+
+  \pause{}
+
+  The constant is elected as an annotation when traversing the DWARF tree.
+
+  It affects the entry directly below it.
+
+  \pause{}
+
+  For portability purposes, we may choose to conditionally define \verb|$| and
+  use a more standard identifier.
+\end{frame}
+
+\plain{What's next?}
+
+\begin{frame}[fragile]{What's next?}
+
+  \begin{center}
+    \large Get out of alpha and release v1.0! \normalsize
+
+    \includegraphics[height=50pt]{insight.png}
+
+    \small (Logo designed by @pbouigue on twitter) \normalsize
+
+    Any sensible contribution is welcome.
+
+    \large \faGithub \normalsize\hspace{0.7em}
+    \url{https://snai.pe/git/insight}
+
+    \large \faEnvelope \normalsize\hspace{0.7em}
+    \verb|franklinmathieu+insight@gmail.com|
+
+    \verb|Snaipe| on \verb|#criterion-dev| @ \url{irc.freenode.net}
+
+  \end{center}
+\end{frame}
+
+\plain{Questions?}
+
+\end{document}
